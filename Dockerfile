@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Sử dụng PHP base image thay vì Node
-FROM php:8.1-fpm-bullseye
+FROM php:8.4-fpm-bullseye
 
 # Install system dependencies và PHP extensions
 RUN apt-get update -y && \
@@ -34,8 +34,8 @@ RUN apt-get update -y && \
 # Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# Install Node.js và npm (để build assets)
-RUN curl -fsSL https://deb.nodesource.com/setup_16.x | bash - \
+# Install Node.js và npm (nâng cấp lên Node 18)
+RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
     && apt-get install -y nodejs \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
