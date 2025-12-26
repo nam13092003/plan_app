@@ -27,6 +27,7 @@ RUN apt-get update -y && \
     intl \
     mbstring \
     opcache \
+    exif \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -55,8 +56,8 @@ RUN npm ci --only=production || npm install --production || true
 # Copy application code
 COPY . .
 
-# Copy .env.example nếu tồn tại, nếu không thì bỏ qua
-COPY .env.example .env 2>/dev/null || true
+# Copy .env.example thành .env nếu .env chưa tồn tại
+RUN if [ ! -f .env ]; then cp .env.example .env 2>/dev/null || true; fi
 
 # Generate autoloader và optimize
 RUN composer dump-autoload --optimize --classmap-authoritative
