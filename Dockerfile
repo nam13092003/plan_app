@@ -59,8 +59,15 @@ COPY . .
 # Copy .env.example thành .env nếu .env chưa tồn tại
 RUN if [ ! -f .env ]; then cp .env.example .env 2>/dev/null || true; fi
 
-# Generate autoloader và optimize
-RUN composer dump-autoload --optimize --classmap-authoritative
+# Tạo thư mục cache cần thiết trước khi dump-autoload
+RUN mkdir -p bootstrap/cache storage/framework/cache/data storage/framework/sessions storage/framework/views \
+    && chmod -R 775 bootstrap/cache storage
+
+# Generate autoloader và optimize (skip scripts để tránh lỗi package:discover)
+RUN composer dump-autoload --optimize --classmap-authoritative --no-scripts
+
+# Chạy package:discover sau khi đã có đầy đủ thư mục
+RUN php artisan package:discover --ansi || true
 
 # Build assets (nếu có)
 RUN npm run build || true
