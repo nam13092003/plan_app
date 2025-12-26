@@ -1,72 +1,80 @@
-# Multi-stage build cho production
-# Stage 1: Build assets với Node.js
-FROM node:20-alpine AS node-builder
+# syntax=docker/dockerfile:1
 
-WORKDIR /var/www/html
-
-# Copy package files
-COPY package*.json ./
-
-# Install dependencies (cần devDependencies để build)
-RUN npm ci
-
-# Copy source files cho build
-COPY . .
-
-# Build assets cho production
-RUN npm run build
-
-# Stage 2: PHP-FPM application
-FROM php:8.2-fpm
+# Sử dụng PHP base image thay vì Node
+FROM php:8.1-fpm-bullseye
 
 # Install system dependencies và PHP extensions
-RUN apt-get update && apt-get install -y \
+RUN apt-get update -y && \
+    apt-get install -y --no-install-recommends \
+    software-properties-common \
+    gnupg2 \
+    wget \
     git \
     unzip \
-    libzip-dev \
     libpng-dev \
-    libjpeg62-turbo-dev \
+    libjpeg-dev \
     libfreetype6-dev \
+    libzip-dev \
+    libicu-dev \
     libonig-dev \
-    libxml2-dev \
-    zip \
     curl \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip opcache \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    && docker-php-ext-install -j$(nproc) \
+    pdo_mysql \
+    mysqli \
+    gd \
+    zip \
+    intl \
+    mbstring \
+    opcache \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# Copy built assets từ node-builder
-COPY --from=node-builder /var/www/html/public/build /var/www/html/public/build
+# Install Node.js và npm (để build assets)
+RUN curl -fsSL https://deb.nodesource.com/setup_16.x | bash - \
+    && apt-get install -y nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /var/www/html
 
-# Copy application files
+# Copy composer files trước để tận dụng Docker cache
+COPY composer.json composer.lock ./
+
+# Install PHP dependencies (không chạy update, chỉ install)
+RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist --optimize-autoloader
+
+# Copy package.json và install Node dependencies
+COPY package*.json ./
+RUN npm ci --only=production || npm install --production || true
+
+# Copy application code
 COPY . .
 
-# Install PHP dependencies (không cần dev dependencies)
-RUN composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist
+# Copy .env.example nếu tồn tại, nếu không thì bỏ qua
+COPY .env.example .env 2>/dev/null || true
 
-# Set proper permissions
+# Generate autoloader và optimize
+RUN composer dump-autoload --optimize --classmap-authoritative
+
+# Build assets (nếu có)
+RUN npm run build || true
+
+# Set permissions
 RUN chown -R www-data:www-data /var/www/html \
     && chmod -R 755 /var/www/html/storage \
     && chmod -R 755 /var/www/html/bootstrap/cache
 
-# Copy entrypoint script
-COPY docker/docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# Expose port
+EXPOSE 8000
 
-# Copy PHP-FPM configuration
-COPY docker/php-fpm.conf /usr/local/etc/php-fpm.d/www.conf
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
+    CMD php artisan --version || exit 1
 
-# Copy OPcache configuration
-COPY docker/opcache.ini /usr/local/etc/php/conf.d/opcache.ini
-
-# Expose port 9000 cho PHP-FPM
-EXPOSE 9000
-
-# Use entrypoint script
-ENTRYPOINT ["docker-entrypoint.sh"]
+# Start script - sử dụng artisan serve
+CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]
